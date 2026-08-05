@@ -80,6 +80,7 @@ curl -s https://cdn.robodk.com/downloads/Install-RoboDK.tar.gz | tar -xz
 sudo apt-get update
 sudo apt-get install -y libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 libxcb-render-util0
 sudo apt-get install -y libxcb-image0 libxcb-randr0 libxcb-sync1 libxcb-xfixes0 libxcb-shape0 libx11-xcb1 libfontconfig1
+sudo apt-get install -y libgl1 libegl1
 
 # If RoboDK is already installed, delete the existing folder first:
 # rm -rf ~/RoboDK
