@@ -7,6 +7,7 @@
 #include <QtNetwork/QTcpSocket>
 #include <QtCore/QProcess>
 #include <QFile>
+#include <QThread>
 
 
 #ifdef _WIN32
@@ -789,6 +790,88 @@ void Item::Save(const QString &filename)
 }
 
 /// <summary>
+/// Copy the item to the clipboard (same as Ctrl+C). Use together with Paste() to duplicate items.
+/// </summary>
+/// <param name="copy_children">Set to false to prevent copying all items attached to this item.</param>
+void Item::Copy(bool copy_children)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("Copy2");
+    _RDK->_send_Item(this);
+    _RDK->_send_Int(copy_children ? 1 : 0);
+    _RDK->_check_status();
+}
+
+/// <summary>
+/// Paste the copied Item from the clipboard as a child of this item (same as Ctrl+V).
+/// </summary>
+/// <returns>the new item created (pasted)</returns>
+Item Item::Paste()
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("Paste");
+    _RDK->_send_Item(this);
+    Item newitem = _RDK->_recv_Item();
+    _RDK->_check_status();
+    return newitem;
+}
+
+/// <summary>
+/// Adds an object attached to this object.
+/// </summary>
+/// <param name="filename">file path</param>
+/// <returns>added object/shape (use item.Valid() to check if item is valid.)</returns>
+Item Item::AddFile(const QString &filename)
+{
+    return _RDK->AddFile(filename, this);
+}
+
+/// <summary>
+/// Returns True if this item is in a collision state with another Item, otherwise it returns False.
+/// </summary>
+/// <param name="item_check">item to check for collisions</param>
+bool Item::Collision(const Item &item_check)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("Collided");
+    _RDK->_send_Item(this);
+    _RDK->_send_Item(item_check);
+    int ncollisions = _RDK->_recv_Int();
+    _RDK->_check_status();
+    return ncollisions > 0;
+}
+
+/// <summary>
+/// Return True if the object is inside the provided object.
+/// </summary>
+/// <param name="object">object to check</param>
+bool Item::IsInside(const Item &object)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("IsInside");
+    _RDK->_send_Item(this);
+    _RDK->_send_Item(object);
+    int inside = _RDK->_recv_Int();
+    _RDK->_check_status();
+    return inside > 0;
+}
+
+/// <summary>
+/// Makes a copy of the geometry fromitem adding it at a given position (pose), relative to this item.
+/// </summary>
+/// <param name="fromitem">item to copy the geometry from</param>
+/// <param name="pose">pose (relative to this item) to add the copied geometry</param>
+void Item::AddGeometry(const Item &fromitem, const Mat &pose)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("CopyFaces");
+    _RDK->_send_Item(fromitem);
+    _RDK->_send_Item(this);
+    _RDK->_send_Pose(pose);
+    _RDK->_check_status();
+}
+
+/// <summary>
 /// Deletes an item and its childs from the station.
 /// </summary>
 void Item::Delete()
@@ -979,6 +1062,40 @@ void Item::setName(const QString &name)
 // add more methods
 
 /// <summary>
+/// Set a specific property name to a given value. This is reserved for internal purposes and future compatibility.
+/// </summary>
+/// <param name="varname">property name</param>
+/// <param name="value">property value</param>
+void Item::setValue(const QString &varname, const QString &value)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("S_Gen_Str");
+    _RDK->_send_Item(this);
+    _RDK->_send_Line(varname);
+    _RDK->_send_Line(value);
+    _RDK->_check_status();
+}
+
+/// <summary>
+/// Set a specific property name to a given value. This is reserved for internal purposes and future compatibility.
+/// </summary>
+/// <param name="varname">property name</param>
+/// <param name="value">property value</param>
+/// <returns>Matrix returned by the command (if any)</returns>
+tMatrix2D *Item::setValue(const QString &varname, tMatrix2D *value)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("S_ValueMat");
+    _RDK->_send_Item(this);
+    _RDK->_send_Line(varname);
+    _RDK->_send_Matrix2D(value);
+    tMatrix2D *mat2d = nullptr;
+    _RDK->_recv_Matrix2D(&mat2d);
+    _RDK->_check_status();
+    return mat2d;
+}
+
+/// <summary>
 /// Sets the local position (pose) of an object, target or reference frame. For example, the position of an object/frame/target with respect to its parent.
 /// If a robot is provided, it will set the pose of the end efector.
 /// </summary>
@@ -1005,6 +1122,120 @@ Mat Item::Pose() const
     Mat pose = _RDK->_recv_Pose();
     _RDK->_check_status();
     return pose;
+}
+
+/// <summary>
+/// Get the list of parents of an Item up to the Station, ordered from the Item's parent to the Station.
+/// Internal helper used by Item::PoseWrt (ported from robodk.robolinkutils.getAncestors).
+/// </summary>
+static QList<Item> _Item_GetAncestors(Item item)
+{
+    QList<Item> parents;
+    Item parent = item;
+    int parentType = parent.Valid() ? parent.Type() : -1;
+    while (parent.Valid() && parentType != RoboDK::ITEM_TYPE_STATION && parentType != -1)
+    {
+        parent = parent.Parent();
+        parents.append(parent);
+        parentType = parent.Valid() ? parent.Type() : -1;
+    }
+    return parents;
+}
+
+/// <summary>
+/// Gets the pose between two Items that have a hierarchical relationship in the Station's tree.
+/// There can be N Items between the two. This function will throw an error for synchronized axis.
+/// Internal helper used by Item::PoseWrt (ported from robodk.robolinkutils.getAncestorPose).
+/// </summary>
+static Mat _Item_GetAncestorPose(Item item_child, Item item_parent)
+{
+    if (item_child.GetID() == item_parent.GetID())
+    {
+        return Mat();
+    }
+
+    QList<Item> parents = _Item_GetAncestors(item_child);
+    int idx = -1;
+    for (int i = 0; i < parents.size(); i++)
+    {
+        if (parents[i].GetID() == item_parent.GetID())
+        {
+            idx = i;
+            break;
+        }
+    }
+
+    if (idx < 0)
+    {
+        throw std::runtime_error("item_parent is not an ancestor of item_child");
+    }
+
+    QList<Item> items;
+    items.append(item_child);
+    items.append(parents);
+    int idxFull = idx + 1;
+
+    Mat poseWrt;
+    for (int i = idxFull - 1; i >= 0; i--)
+    {
+        Item it = items[i];
+        int itemType = it.Type();
+        if (itemType == RoboDK::ITEM_TYPE_TOOL)
+        {
+            poseWrt = poseWrt * it.PoseTool();
+        }
+        else if (itemType == RoboDK::ITEM_TYPE_ROBOT)
+        {
+            if (it.getLink(RoboDK::ITEM_TYPE_ROBOT).GetID() != it.GetID())
+            {
+                continue;
+            }
+
+            QList<Item> axesLinks = it.getLinks(RoboDK::ITEM_TYPE_ROBOT_AXES);
+            if (!axesLinks.isEmpty())
+            {
+                throw std::runtime_error("This function does not support synchronized axis");
+            }
+
+            tJoints joints = it.Joints();
+            poseWrt = poseWrt * it.SolveFK(joints);
+        }
+        else
+        {
+            poseWrt = poseWrt * it.Pose();
+        }
+    }
+    return poseWrt;
+}
+
+/// <summary>
+/// Returns the relative pose of this Item with respect to an another Item.
+/// </summary>
+/// <param name="item">The other Item</param>
+/// <returns>The pose from this Item to the second Item</returns>
+Mat Item::PoseWrt(Item item)
+{
+    if (GetID() == item.GetID())
+    {
+        return Mat();
+    }
+
+    Mat pose1 = PoseAbs();
+    Mat pose2 = item.PoseAbs();
+
+    int type1 = Type();
+    if (type1 == RoboDK::ITEM_TYPE_ROBOT || type1 == RoboDK::ITEM_TYPE_TOOL)
+    {
+        pose1 = _Item_GetAncestorPose(*this, RDK()->getActiveStation());
+    }
+
+    int type2 = item.Type();
+    if (type2 == RoboDK::ITEM_TYPE_ROBOT || type2 == RoboDK::ITEM_TYPE_TOOL)
+    {
+        pose2 = _Item_GetAncestorPose(item, item.RDK()->getActiveStation());
+    }
+
+    return pose2.inv() * pose1;
 }
 
 /// <summary>
@@ -1191,6 +1422,99 @@ void Item::setColor(double colorRGBA[4])
 ///
 ///
 
+/// <summary>
+/// Changes the color of an Item (object, tool or robot).
+/// Colors must in the format COLOR=[R,G,B,(A=1)] where all values range from 0 to 1.
+/// Alpha (A) defaults to 1 (100% opaque). Set A to 0 to make an object transparent.
+/// </summary>
+/// <param name="tocolor">color to set</param>
+/// <param name="fromcolor">color to change (optional, leave null to recolor the whole item)</param>
+/// <param name="tolerance">tolerance to replace colors (set to 0 for exact match), defaults to 0.1</param>
+void Item::Recolor(double tocolor[4], double fromcolor[4], double tolerance)
+{
+    double defaultFromColor[4] = {0, 0, 0, 0};
+    double *useFromColor = fromcolor;
+    double useTolerance = tolerance;
+    if (useFromColor == nullptr)
+    {
+        useFromColor = defaultFromColor;
+        useTolerance = 2;
+    }
+    else if (useTolerance <= 0)
+    {
+        useTolerance = 0.1;
+    }
+
+    double values[9];
+    values[0] = useTolerance;
+    values[1] = useFromColor[0];
+    values[2] = useFromColor[1];
+    values[3] = useFromColor[2];
+    values[4] = useFromColor[3];
+    values[5] = tocolor[0];
+    values[6] = tocolor[1];
+    values[7] = tocolor[2];
+    values[8] = tocolor[3];
+
+    _RDK->_check_connection();
+    _RDK->_send_Line("Recolor");
+    _RDK->_send_Item(this);
+    _RDK->_send_Array(values, 9);
+    _RDK->_check_status();
+}
+
+/// <summary>
+/// Set the color of an object shape. It can also be used for tools.
+/// A color must in the format COLOR=[R,G,B,(A=1)] where all values range from 0 to 1.
+/// </summary>
+/// <param name="tocolor">color to set</param>
+/// <param name="shape_id">ID of the shape: the ID is the order in which the shape was added using AddShape()</param>
+void Item::setColorShape(double tocolor[4], int shape_id)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("S_ShapeColor");
+    _RDK->_send_Item(this);
+    _RDK->_send_Int(shape_id);
+    _RDK->_send_Array(tocolor, 4);
+    _RDK->_check_status();
+}
+
+/// <summary>
+/// Set the color of a curve object. It can also be used for tools.
+/// A color must in the format COLOR=[R,G,B,(A=1)] where all values range from 0 to 1.
+/// </summary>
+/// <param name="tocolor">color to set</param>
+/// <param name="curve_id">ID of the curve: the ID is the order in which the shape was added using AddCurve()</param>
+void Item::setColorCurve(double tocolor[4], int curve_id)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("S_CurveColor");
+    _RDK->_send_Item(this);
+    _RDK->_send_Int(curve_id);
+    _RDK->_send_Array(tocolor, 4);
+    _RDK->_check_status();
+}
+
+/// <summary>
+/// Return the color of an Item (object, tool or robot). If the item has multiple colors it returns the first color available.
+/// A color is in the format COLOR=[R,G,B,(A=1)] where all values range from 0 to 1.
+/// </summary>
+QList<double> Item::Color()
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("G_Color");
+    _RDK->_send_Item(this);
+    double colorValues[100];
+    int nvalues = 100;
+    _RDK->_recv_Array(colorValues, &nvalues);
+    _RDK->_check_status();
+    QList<double> color;
+    for (int i = 0; i < nvalues; i++)
+    {
+        color.append(colorValues[i]);
+    }
+    return color;
+}
 
 /// <summary>
 /// Apply a scale to an object to make it bigger or smaller.
@@ -1243,6 +1567,52 @@ GetPointsResult Item::GetPoints(int featureType, int featureId)
     result.featureId = featureId;
     _RDK->_check_status();
     return result;
+}
+
+/// <summary>
+/// Adds a shape to the object provided some triangle coordinates. Triangles must be provided as a list of vertices. A vertex normal can be optionally provided.
+/// </summary>
+/// <param name="trianglePoints">List of vertices grouped by triangles (3xN or 6xN matrix, N must be multiple of 3)</param>
+/// <returns>added object/shape (use item.Valid() to check if item is valid.)</returns>
+Item Item::AddShape(tMatrix2D *trianglePoints)
+{
+    return _RDK->AddShape(trianglePoints, this);
+}
+
+/// <summary>
+/// Adds a curve provided point coordinates. The provided points must be a list of vertices. A vertex normal can be provided optionally.
+/// </summary>
+/// <param name="curvePoints">matrix 3xN or 6xN -> N must be multiple of 3</param>
+/// <param name="addToRef">If True, the curve will be added as part of this object in the RoboDK item tree</param>
+/// <param name="ProjectionType">Type of projection. Use the PROJECTION_* flags.</param>
+/// <returns>added object/curve (use item.Valid() to check if item is valid.)</returns>
+Item Item::AddCurve(tMatrix2D *curvePoints, bool addToRef, int ProjectionType)
+{
+    return _RDK->AddCurve(curvePoints, this, addToRef, ProjectionType);
+}
+
+/// <summary>
+/// Adds a list of points to an object. The provided points must be a list of vertices. A vertex normal can be provided optionally.
+/// </summary>
+/// <param name="points">list of points as a matrix (3xN matrix, or 6xN to provide point normals as ijk vectors)</param>
+/// <param name="addToRef">If True, the points will be added as part of this object in the RoboDK item tree</param>
+/// <param name="ProjectionType">Type of projection. Use the PROJECTION_* flags.</param>
+/// <returns>added object/shape (0 if failed)</returns>
+Item Item::AddPoints(tMatrix2D *points, bool addToRef, int ProjectionType)
+{
+    return _RDK->AddPoints(points, this, addToRef, ProjectionType);
+}
+
+/// <summary>
+/// Projects a point or a list of points to this object given its coordinates. The provided points must be a list of [XYZ] coordinates. Optionally, a vertex normal can be provided [XYZijk].
+/// The difference between ProjectPoints and AddPoints is that ProjectPoints does not add the points to the RoboDK station.
+/// </summary>
+/// <param name="points">list of points to project</param>
+/// <param name="projected">projected points (output)</param>
+/// <param name="ProjectionType">Type of projection. Use the PROJECTION_* flags.</param>
+void Item::ProjectPoints(tMatrix2D *points, tMatrix2D **projected, int ProjectionType)
+{
+    _RDK->ProjectPoints(points, projected, *this, ProjectionType);
 }
 
 bool Item::SelectedFeature(int& featureType, int& featureId)
@@ -1340,6 +1710,50 @@ tJoints Item::Joints() const
 // add more methods
 
 /// <summary>
+/// Return the current joint position of a robot (only from the simulator, never from the real robot).
+/// This should be used only when RoboDK is connected to the real robot and only the simulated robot needs to be retrieved (for example, if we want to move the robot using a spacemouse).
+/// Note: Use Joints() instead to retrieve the simulated and real robot position when connected.
+/// </summary>
+tJoints Item::SimulatorJoints() const
+{
+    tJoints jnts;
+    _RDK->_check_connection();
+    _RDK->_send_Line("G_Thetas_Sim");
+    _RDK->_send_Item(this);
+    _RDK->_recv_Array(&jnts);
+    _RDK->_check_status();
+    return jnts;
+}
+
+/// <summary>
+/// Returns the positions of the joint links for a provided robot configuration (joints). If no joints are provided it will return the poses for the current robot position.
+/// </summary>
+/// <param name="joints">joints to compute the link poses for (optional, leave null to use the current robot position)</param>
+/// <returns>array of 4x4 homogeneous matrices. Index 0 is the base frame reference (it never moves when the joints move).</returns>
+QList<Mat> Item::JointPoses(const tJoints *joints)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("G_LinkPoses");
+    _RDK->_send_Item(this);
+    if (joints != nullptr)
+    {
+        _RDK->_send_Array(joints);
+    }
+    else
+    {
+        _RDK->_send_Array(static_cast<double *>(nullptr), 0);
+    }
+    int nlinks = _RDK->_recv_Int();
+    QList<Mat> poses;
+    for (int i = 0; i < nlinks; i++)
+    {
+        poses.append(_RDK->_recv_Pose());
+    }
+    _RDK->_check_status();
+    return poses;
+}
+
+/// <summary>
 /// Returns the home joints of a robot. These joints can be manually set in the robot "Parameters" menu, then select "Set home position"
 /// </summary>
 /// <returns>double x n -> joints array</returns>
@@ -1400,6 +1814,44 @@ Item Item::getLink(int type_linked)
     return item;
 }
 
+/// <summary>
+/// Get all the items of a specific type for which getLink() returns this item.
+/// </summary>
+/// <param name="type_linked">type of the items to check for a link (ITEM_TYPE_*)</param>
+/// <returns>A list of items for which getLink() returns this item</returns>
+QList<Item> Item::getLinks(int type_linked)
+{
+    QList<Item> links;
+    int itemType = Type();
+    QList<Item> candidates = _RDK->getItemList(type_linked);
+    for (Item &candidate : candidates)
+    {
+        if (candidate.GetID() == GetID())
+        {
+            continue;
+        }
+
+        Item link = candidate.getLink(itemType);
+        if (link.Valid() && link.GetID() == GetID())
+        {
+            links.append(candidate);
+        }
+    }
+    return links;
+}
+
+/// <summary>
+/// Sets a link between this item and the specified item. This is useful to set the relationship between programs, robots, tools and other specific projects.
+/// </summary>
+/// <param name="item">item to link</param>
+void Item::setLink(const Item &item)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("S_Link_ptr");
+    _RDK->_send_Item(item);
+    _RDK->_send_Item(this);
+    _RDK->_check_status();
+}
 
 /// <summary>
 /// Sets the current joints of a robot or the joints of a target. It the item is a cartesian target, it returns the preferred joints (configuration) to go to that cartesian position.
@@ -1619,6 +2071,33 @@ QList<tJoints> Item::SolveIK_All(const Mat &pose, const Mat *tool, const Mat *re
 }
 
 /// <summary>
+/// Filters a target to improve accuracy. This option requires a calibrated robot.
+/// </summary>
+/// <param name="pose">pose of the robot TCP with respect to the robot reference frame</param>
+/// <param name="joints_filtered">filtered joints (output, optional)</param>
+/// <param name="joints_approx">approximated desired joints to define the preferred configuration (optional)</param>
+/// <returns>filtered pose</returns>
+Mat Item::FilterTarget(const Mat &pose, tJoints *joints_filtered, const tJoints *joints_approx)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("FilterTarget");
+    _RDK->_send_Pose(pose);
+    tJoints defaultJointsApprox(6);
+    const tJoints *jointsToSend = (joints_approx != nullptr) ? joints_approx : &defaultJointsApprox;
+    _RDK->_send_Array(jointsToSend);
+    _RDK->_send_Item(this);
+    Mat poseFiltered = _RDK->_recv_Pose();
+    tJoints jntsFiltered;
+    _RDK->_recv_Array(&jntsFiltered);
+    _RDK->_check_status();
+    if (joints_filtered != nullptr)
+    {
+        *joints_filtered = jntsFiltered;
+    }
+    return poseFiltered;
+}
+
+/// <summary>
 /// Connect to a real robot using the robot driver.
 /// </summary>
 /// <param name="robot_ip">IP of the robot to connect. Leave empty to use the one defined in RoboDK</param>
@@ -1646,6 +2125,27 @@ bool Item::Disconnect()
     int status = _RDK->_recv_Int();
     _RDK->_check_status();
     return status != 0;
+}
+
+/// <summary>
+/// Set the robot connection parameters.
+/// </summary>
+/// <param name="robot_ip">robot IP</param>
+/// <param name="port">robot communication port</param>
+/// <param name="remote_path">path to transfer files on the robot controller</param>
+/// <param name="ftp_user">user name for the FTP connection</param>
+/// <param name="ftp_pass">password credential for the FTP connection</param>
+void Item::setConnectionParams(const QString &robot_ip, int port, const QString &remote_path, const QString &ftp_user, const QString &ftp_pass)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("setConnectParams");
+    _RDK->_send_Item(this);
+    _RDK->_send_Line(robot_ip);
+    _RDK->_send_Int(port);
+    _RDK->_send_Line(remote_path);
+    _RDK->_send_Line(ftp_user);
+    _RDK->_send_Line(ftp_pass);
+    _RDK->_check_status();
 }
 
 /// <summary>
@@ -1733,6 +2233,57 @@ void Item::MoveL(const Mat &target, bool blocking)
 }
 
 /// <summary>
+/// Moves a robot to a specific target and stops when a specific input switch is detected ("Search Linear" mode). This function waits (blocks) until the robot finishes its movements.
+/// </summary>
+/// <param name="target">target -> target to move to as a target item (RoboDK target item)</param>
+/// <param name="blocking">blocking -> True if we want the instruction to block until the robot finished the movement (default=true)</param>
+/// <returns>the joints of the robot after the search move (retrieved from the simulator)</returns>
+tJoints Item::SearchL(const Item &target, bool blocking)
+{
+    if (_TYPE == RoboDK::ITEM_TYPE_PROGRAM)
+    {
+        _RDK->_moveX(&target, nullptr, nullptr, this, RoboDK::MOVE_TYPE_LINEARSEARCH, false);
+        return tJoints();
+    }
+    _RDK->_moveX(&target, nullptr, nullptr, this, RoboDK::MOVE_TYPE_LINEARSEARCH, blocking);
+    return SimulatorJoints();
+}
+
+/// <summary>
+/// Moves a robot to a specific target and stops when a specific input switch is detected ("Search Linear" mode). This function waits (blocks) until the robot finishes its movements.
+/// </summary>
+/// <param name="target">joints -> joint target to move to.</param>
+/// <param name="blocking">blocking -> True if we want the instruction to block until the robot finished the movement (default=true)</param>
+/// <returns>the joints of the robot after the search move (retrieved from the simulator)</returns>
+tJoints Item::SearchL(const tJoints &target, bool blocking)
+{
+    if (_TYPE == RoboDK::ITEM_TYPE_PROGRAM)
+    {
+        _RDK->_moveX(nullptr, &target, nullptr, this, RoboDK::MOVE_TYPE_LINEARSEARCH, false);
+        return tJoints();
+    }
+    _RDK->_moveX(nullptr, &target, nullptr, this, RoboDK::MOVE_TYPE_LINEARSEARCH, blocking);
+    return SimulatorJoints();
+}
+
+/// <summary>
+/// Moves a robot to a specific target and stops when a specific input switch is detected ("Search Linear" mode). This function waits (blocks) until the robot finishes its movements.
+/// </summary>
+/// <param name="target">pose -> pose target to move to. It must be a 4x4 Homogeneous matrix</param>
+/// <param name="blocking">blocking -> True if we want the instruction to block until the robot finished the movement (default=true)</param>
+/// <returns>the joints of the robot after the search move (retrieved from the simulator)</returns>
+tJoints Item::SearchL(const Mat &target, bool blocking)
+{
+    if (_TYPE == RoboDK::ITEM_TYPE_PROGRAM)
+    {
+        _RDK->_moveX(nullptr, nullptr, &target, this, RoboDK::MOVE_TYPE_LINEARSEARCH, false);
+        return tJoints();
+    }
+    _RDK->_moveX(nullptr, nullptr, &target, this, RoboDK::MOVE_TYPE_LINEARSEARCH, blocking);
+    return SimulatorJoints();
+}
+
+/// <summary>
 /// Moves a robot to a specific target ("Move Circular" mode). By default, this function blocks until the robot finishes its movements.
 /// </summary>
 /// <param name="itemtarget1">target -> intermediate target to move to as a target item (RoboDK target item)</param>
@@ -1788,6 +2339,32 @@ int Item::MoveJ_Test(const tJoints &j1, const tJoints &j2, double minstep_deg)
 }
 
 /// <summary>
+/// Checks if a joint movement with blending is feasible and free of collisions (if collision checking is activated). The robot will move to the collision point if a collision is detected (use Joints to collect the collision joints) or it will be placed at the destination joints if a collision is not detected.
+/// </summary>
+/// <param name="j1">joints -> start joints</param>
+/// <param name="j2">joints -> joints via</param>
+/// <param name="j3">joints -> joints final destination</param>
+/// <param name="blend_deg">blend in degrees</param>
+/// <param name="minstep_deg">(optional): maximum joint step in degrees</param>
+/// <returns>collision : returns 0 if the movement is free of collision. Otherwise it returns the number of pairs of objects that collided if there was a collision.</returns>
+int Item::MoveJ_Test_Blend(const tJoints &j1, const tJoints &j2, const tJoints &j3, double blend_deg, double minstep_deg)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("CollisionMoveBlend");
+    _RDK->_send_Item(this);
+    _RDK->_send_Array(&j1);
+    _RDK->_send_Array(&j2);
+    _RDK->_send_Array(&j3);
+    _RDK->_send_Int((int)(minstep_deg * 1000.0));
+    _RDK->_send_Int((int)(blend_deg * 1000.0));
+    _RDK->_TIMEOUT = 3600 * 1000;
+    int collision = _RDK->_recv_Int();
+    _RDK->_TIMEOUT = ROBODK_API_TIMEOUT;
+    _RDK->_check_status();
+    return collision;
+}
+
+/// <summary>
 /// Checks if a linear movement is free of collision.
 /// </summary>
 /// <param name="j1">joints -> start joints</param>
@@ -1829,6 +2406,33 @@ void Item::setSpeed(double speed_linear, double speed_joints, double accel_linea
     speed_accel[3] = accel_joints;
     _RDK->_send_Array(speed_accel, 4);
     _RDK->_check_status();
+}
+
+/// <summary>
+/// Sets the linear acceleration of a robot in mm/s2
+/// </summary>
+/// <param name="accel_linear">acceleration in mm/s2</param>
+void Item::setAcceleration(double accel_linear)
+{
+    setSpeed(-1, -1, accel_linear, -1);
+}
+
+/// <summary>
+/// Sets the joint speed of a robot in deg/s for rotary joints and mm/s for linear joints
+/// </summary>
+/// <param name="speed_joints">speed in deg/s for rotary joints and mm/s for linear joints</param>
+void Item::setSpeedJoints(double speed_joints)
+{
+    setSpeed(-1, speed_joints, -1, -1);
+}
+
+/// <summary>
+/// Sets the joint acceleration of a robot
+/// </summary>
+/// <param name="accel_joints">acceleration in deg/s2 for rotary joints and mm/s2 for linear joints</param>
+void Item::setAccelerationJoints(double accel_joints)
+{
+    setSpeed(-1, -1, -1, accel_joints);
 }
 
 /// <summary>
@@ -1904,6 +2508,28 @@ void Item::WaitMove(double timeout_sec) const
     //}
 }
 
+/// <summary>
+/// Wait until a program finishes or a robot completes its movement.
+/// </summary>
+void Item::WaitFinished()
+{
+    while (Busy())
+    {
+        QThread::msleep(50);
+    }
+}
+
+/// <summary>
+/// Defines the name of the program when a program must be generated. It is possible to specify the name of the post processor as well as the folder to save the program.
+/// This method must be called before any program output is generated (before any robot movement or other program instructions).
+/// </summary>
+/// <param name="progname">name of the program</param>
+/// <param name="folder">folder to save the program, leave empty to use the default program folder</param>
+/// <param name="postprocessor">name of the post processor (for a post processor in C:/RoboDK/Posts/Fanuc_post.py it is possible to provide "Fanuc_post.py" or simply "Fanuc_post")</param>
+int Item::ProgramStart(const QString &progname, const QString &folder, const QString &postprocessor)
+{
+    return _RDK->ProgramStart(progname, folder, postprocessor, this);
+}
 
 /// <summary>
 /// Sets the accuracy of the robot active or inactive. A robot must have been calibrated to properly use this option.
@@ -1916,6 +2542,66 @@ void Item::setAccuracyActive(int accurate)
     _RDK->_send_Item(this);
     _RDK->_send_Int(accurate);
     _RDK->_check_status();
+}
+
+/// <summary>
+/// Returns True if the accurate kinematics are being used. Accurate kinematics are available after a robot calibration.
+/// </summary>
+bool Item::AccuracyActive()
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("G_AbsAccOn");
+    _RDK->_send_Item(this);
+    int isaccurate = _RDK->_recv_Int();
+    _RDK->_check_status();
+    return isaccurate > 0;
+}
+
+/// <summary>
+/// Sets the tool mass and center of gravity. This is only used with accurate robots to improve accuracy.
+/// </summary>
+/// <param name="tool_mass">tool weight in Kg</param>
+/// <param name="tool_cog">tool center of gravity as [x,y,z] with respect to the robot flange (optional)</param>
+void Item::setParamRobotTool(double tool_mass, const tXYZ tool_cog)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("S_ParamCalibTool");
+    _RDK->_send_Item(this);
+    double values[4];
+    int nvalues = 1;
+    values[0] = tool_mass;
+    if (tool_cog != nullptr)
+    {
+        values[1] = tool_cog[0];
+        values[2] = tool_cog[1];
+        values[3] = tool_cog[2];
+        nvalues = 4;
+    }
+    _RDK->_send_Array(values, nvalues);
+    _RDK->_check_status();
+}
+
+/// <summary>
+/// Filter a program file to improve accuracy for a specific robot. The robot must have been previously calibrated.
+/// It returns 0 if the filter succeeded, or a negative value if there are filtering problems.
+/// </summary>
+/// <param name="filestr">File path of the program. Formats supported include: JBI (Motoman), SRC (KUKA), MOD (ABB), PRG (ABB), LS (FANUC).</param>
+/// <param name="filter_msg">a summary of the filtering (output, optional)</param>
+/// <returns>0 if the filter succeeded, or a negative value if there are filtering problems</returns>
+int Item::FilterProgram(const QString &filestr, QString *filter_msg)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("FilterProg2");
+    _RDK->_send_Item(this);
+    _RDK->_send_Line(filestr);
+    int filter_status = _RDK->_recv_Int();
+    QString msg = _RDK->_recv_Line();
+    _RDK->_check_status();
+    if (filter_msg != nullptr)
+    {
+        *filter_msg = msg;
+    }
+    return filter_status;
 }
 
 ///////// ADD MORE METHODS
@@ -1957,6 +2643,19 @@ void Item::setRunType(int program_run_type)
     _RDK->_send_Item(this);
     _RDK->_send_Int(program_run_type);
     _RDK->_check_status();
+}
+
+/// <summary>
+/// Get the Run Type of a program to specify if a program made using the GUI will be run in simulation mode or on the real robot ("Run on robot" option).
+/// </summary>
+int Item::RunType()
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("G_ProgRunType");
+    _RDK->_send_Item(this);
+    int program_run_type = _RDK->_recv_Int();
+    _RDK->_check_status();
+    return program_run_type;
 }
 
 /// <summary>
@@ -2137,12 +2836,10 @@ void Item::customInstruction(const QString &name, const QString &path_run, const
     _RDK->_check_status();
 }
 
-/*
-/////// obsolete functions
 /// <summary>
-/// Adds a new robot move joint instruction to a program.
+/// Adds a new robot joint move instruction to a program. Obsolete. Use MoveJ instead.
 /// </summary>
-/// <param name="itemtarget">target to move to</param>
+/// <param name="itemtarget">target item to move to</param>
 void Item::addMoveJ(const Item &itemtarget)
 {
     _RDK->_check_connection();
@@ -2154,9 +2851,9 @@ void Item::addMoveJ(const Item &itemtarget)
 }
 
 /// <summary>
-/// Adds a new robot move linear instruction to a program.
+/// Adds a new linear move instruction to a program. Obsolete. Use MoveL instead.
 /// </summary>
-/// <param name="itemtarget">target to move to</param>
+/// <param name="itemtarget">target item to move to</param>
 void Item::addMoveL(const Item &itemtarget)
 {
     _RDK->_check_connection();
@@ -2166,7 +2863,35 @@ void Item::addMoveL(const Item &itemtarget)
     _RDK->_send_Int(2);
     _RDK->_check_status();
 }
-*/
+
+/// <summary>
+/// Adds a new linear search move instruction to a program. Obsolete. Use SearchL instead.
+/// </summary>
+/// <param name="itemtarget">target item to move to</param>
+void Item::addMoveSearch(const Item &itemtarget)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("Add_INSMOVE");
+    _RDK->_send_Item(itemtarget);
+    _RDK->_send_Item(this);
+    _RDK->_send_Int(5);
+    _RDK->_check_status();
+}
+
+/// <summary>
+/// Adds a new circular move instruction to a program. Obsolete. Use MoveL and MoveC instead.
+/// </summary>
+/// <param name="itemtarget1">pass through target item</param>
+/// <param name="itemtarget2">final target item</param>
+void Item::addMoveC(const Item &itemtarget1, const Item &itemtarget2)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("Add_INSMOVEC");
+    _RDK->_send_Item(itemtarget1);
+    _RDK->_send_Item(itemtarget2);
+    _RDK->_send_Item(this);
+    _RDK->_check_status();
+}
 
 /// <summary>
 /// Show or hide instruction items of a program in the RoboDK tree
@@ -2208,6 +2933,35 @@ int Item::InstructionCount()
     int nins = _RDK->_recv_Int();
     _RDK->_check_status();
     return nins;
+}
+
+/// <summary>
+/// Select an instruction in the program as a reference to add new instructions. New instructions will be added after the selected instruction.
+/// If no instruction ID is specified, the active instruction will be selected and returned (if the program is running), otherwise it returns -1.
+/// </summary>
+int Item::InstructionSelect(int ins_id)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("Prog_SelIns");
+    _RDK->_send_Item(this);
+    _RDK->_send_Int(ins_id);
+    ins_id = _RDK->_recv_Int();
+    _RDK->_check_status();
+    return ins_id;
+}
+
+/// <summary>
+/// Delete an instruction of a program
+/// </summary>
+int Item::InstructionDelete(int ins_id)
+{
+    _RDK->_check_connection();
+    _RDK->_send_Line("Prog_DelIns");
+    _RDK->_send_Item(this);
+    _RDK->_send_Int(ins_id);
+    int success = _RDK->_recv_Int();
+    _RDK->_check_status();
+    return success;
 }
 
 /// <summary>

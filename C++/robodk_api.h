@@ -1546,7 +1546,10 @@ public:
         ITEM_TYPE_CALIBPROJECT = 13,
 
         /// Robot path accuracy validation project.
-        ITEM_TYPE_VALID_ISO9283 = 14
+        ITEM_TYPE_VALID_ISO9283 = 14,
+
+        /// Robot axes item (subtype of ITEM_TYPE_ROBOT for axes).
+        ITEM_TYPE_ROBOT_AXES = 21
     };
 
     /// Instruction types
@@ -1606,7 +1609,10 @@ public:
         MOVE_TYPE_LINEAR = 2,
 
         /// Circular movement (MoveC).
-        MOVE_TYPE_CIRCULAR = 3
+        MOVE_TYPE_CIRCULAR = 3,
+
+        /// Linear search move (SearchL).
+        MOVE_TYPE_LINEARSEARCH = 5
     };
 
     /// Script execution types used by IRoboDK.setRunMode and IRoboDK.RunMode
@@ -2093,10 +2099,48 @@ public:
     int Type() const;
 
     /// <summary>
+    /// Copy the item to the clipboard (same as Ctrl+C). Use together with Paste() to duplicate items.
+    /// </summary>
+    /// <param name="copy_children">Set to false to prevent copying all items attached to this item.</param>
+    void Copy(bool copy_children = true);
+
+    /// <summary>
+    /// Paste the copied :class:`.Item` from the clipboard as a child of this item (same as Ctrl+V)
+    /// Returns the new item created (pasted)
+    /// </summary>
+    /// <returns>New item created (pasted)</returns>
+    Item Paste();
+
+    /// <summary>
+    /// Adds an object attached to this object
+    /// </summary>
+    /// <param name="filename">file path</param>
+    Item AddFile(const QString &filename);
+
+    /// <summary>
     /// Save a station, a robot, a tool or an object to a file
     /// </summary>
     /// <param name="filename">path and file name</param>
     void Save(const QString &filename);
+
+    /// <summary>
+    /// Returns True if this item is in a collision state with another :class:`.Item`, otherwise it returns False.
+    /// </summary>
+    /// <param name="item_check">item to check for collisions</param>
+    bool Collision(const Item &item_check);
+
+    /// <summary>
+    /// Return True if the object is inside the provided object
+    /// </summary>
+    /// <param name="object">object to check</param>
+    bool IsInside(const Item &object);
+
+    /// <summary>
+    /// Makes a copy of the geometry fromitem adding it at a given position (pose), relative to this item.
+    /// </summary>
+    /// <param name="fromitem"></param>
+    /// <param name="pose"></param>
+    void AddGeometry(const Item &fromitem, const Mat &pose);
 
     /// <summary>
     /// Deletes an item and its childs from the station.
@@ -2176,6 +2220,21 @@ public:
     void setName(const QString &name);
 
     /// <summary>
+    /// Set a specific property name to a given value. This is reserved for internal purposes and future compatibility.
+    /// </summary>
+    /// <param name="varname">property name</param>
+    /// <param name="value">property value</param>
+    void setValue(const QString &varname, const QString &value);
+
+    /// <summary>
+    /// Set a specific property name to a given value. This is reserved for internal purposes and future compatibility.
+    /// </summary>
+    /// <param name="varname">property name</param>
+    /// <param name="value">property value</param>
+    /// <returns>Matrix returned by the command (if any)</returns>
+    tMatrix2D *setValue(const QString &varname, tMatrix2D *value);
+
+    /// <summary>
     /// Sets the local position (pose) of an object, target or reference frame. For example, the position of an object/frame/target with respect to its parent.
     /// If a robot is provided, it will set the pose of the end efector.
     /// </summary>
@@ -2188,6 +2247,13 @@ public:
     /// </summary>
     /// <returns>4x4 homogeneous matrix (pose)</returns>
     Mat Pose() const;
+
+    /// <summary>
+    /// Returns the relative pose of this Item with respect to an another Item.
+    /// </summary>
+    /// <param name="item">The other Item</param>
+    /// <returns>The pose from the source Item to the second Item</returns>
+    Mat PoseWrt(Item item);
 
     /// <summary>
     /// Sets the position (pose) the object geometry with respect to its own reference frame. This procedure works for tools and objects.
@@ -2271,6 +2337,16 @@ public:
     Mat PoseAbs();
 
     /// <summary>
+    /// Changes the color of an :class:`.Item` (object, tool or robot).
+    /// Colors must in the format COLOR=[R,G,B,(A=1)] where all values range from 0 to 1.
+    /// Alpha (A) defaults to 1 (100% opaque). Set A to 0 to make an object transparent.
+    /// </summary>
+    /// <param name="tocolor">color to set</param>
+    /// <param name="fromcolor">color to change</param>
+    /// <param name="tolerance">tolerance to replace colors (set to 0 for exact match). Defaults to 0.1, or to 2 if fromcolor is not provided.</param>
+    void Recolor(double tocolor[4], double fromcolor[4] = nullptr, double tolerance = -1);
+
+    /// <summary>
     /// Changes the color of a robot/object/tool. A color must must in the format COLOR=[R,G,B,(A=1)] where all values range from 0 to 1.
     /// Alpha (A) defaults to 1 (100% opaque). Set A to 0 to make an object transparent.
     /// </summary>
@@ -2279,7 +2355,28 @@ public:
     /// <param name="tolerance">optional tolerance to use if a color filter is used (defaults to 0.1)</param>
     void setColor(double colorRGBA[4]);
 
+    /// <summary>
+    /// Set the color of an object shape. It can also be used for tools.
+    /// A color must in the format COLOR=[R,G,B,(A=1)] where all values range from 0 to 1.
+    /// </summary>
+    /// <param name="tocolor">color to set</param>
+    /// <param name="shape_id">ID of the shape: the ID is the order in which the shape was added using AddShape()</param>
+    void setColorShape(double tocolor[4], int shape_id);
 
+    /// <summary>
+    /// Set the color of a curve object. It can also be used for tools.
+    /// A color must in the format COLOR=[R,G,B,(A=1)] where all values range from 0 to 1.
+    /// </summary>
+    /// <param name="tocolor">color to set</param>
+    /// <param name="curve_id">ID of the curve: the ID is the order in which the shape was added using AddCurve()</param>
+    void setColorCurve(double tocolor[4], int curve_id = -1);
+
+    /// <summary>
+    /// Return the color of an :class:`.Item` (object, tool or robot). If the item has multiple colors it returns the first color available).
+    /// A color is in the format COLOR=[R,G,B,(A=1)] where all values range from 0 to 1.
+    /// </summary>
+    /// <returns>Color as [R,G,B,A]</returns>
+    QList<double> Color();
 
 //---------- add more
 
@@ -2306,6 +2403,39 @@ public:
     /// <param name="featureId">The internal ID to retrieve the right geometry from the object (use SelectedFeature).</param>
     /// <returns>GetPointsResult object.</returns>
     GetPointsResult GetPoints(int featureType = RoboDK::FEATURE_SURFACE, int featureId = 0);
+
+    /// <summary>
+    /// Adds a shape to the object provided some triangle coordinates. Triangles must be provided as a list of vertices. A vertex normal can be optionally provided.
+    /// </summary>
+    /// <param name="trianglePoints">List of vertices grouped by triangles (3xN or 6xN matrix, N must be multiple of 3 because vertices must be stacked by groups of 3)</param>
+    /// <returns>added object/shape</returns>
+    Item AddShape(tMatrix2D *trianglePoints);
+
+    /// <summary>
+    /// Adds a curve provided point coordinates. The provided points must be a list of vertices. A vertex normal can be provided optionally.
+    /// </summary>
+    /// <param name="curvePoints">matrix 3xN or 6xN -> N must be multiple of 3</param>
+    /// <param name="addToRef">If True, the curve will be added as part of this object (this object must be an object)</param>
+    /// <param name="ProjectionType">Type of projection. For example: PROJECTION_ALONG_NORMAL_RECALC will project along the point normal and recalculate the normal vector on the surface projected.</param>
+    /// <returns>added object/curve (null if failed)</returns>
+    Item AddCurve(tMatrix2D *curvePoints, bool addToRef = false, int ProjectionType = RoboDK::PROJECTION_ALONG_NORMAL_RECALC);
+
+    /// <summary>
+    /// Adds a list of points to an object. The provided points must be a list of vertices. A vertex normal can be provided optionally.
+    /// </summary>
+    /// <param name="points">list of points as a matrix (3xN matrix, or 6xN to provide point normals as ijk vectors)</param>
+    /// <param name="addToRef">If True, the points will be added as part of this object (this object must be an object)</param>
+    /// <param name="ProjectionType">Type of projection. Use the PROJECTION_* flags.</param>
+    /// <returns>added object/shape (0 if failed)</returns>
+    Item AddPoints(tMatrix2D *points, bool addToRef = false, int ProjectionType = RoboDK::PROJECTION_ALONG_NORMAL_RECALC);
+
+    /// <summary>
+    /// Projects a point given its coordinates. The provided points must be a list of [XYZ] coordinates. Optionally, a vertex normal can be provided [XYZijk].
+    /// </summary>
+    /// <param name="points">Matrix 3xN or 6xN: list of points to project.</param>
+    /// <param name="projected">Projected points as a null/empty matrix. A new matrix will be created</param>
+    /// <param name="ProjectionType">Type of projection. For example: PROJECTION_ALONG_NORMAL_RECALC will project along the point normal and recalculate the normal vector on the surface projected.</param>
+    void ProjectPoints(tMatrix2D *points, tMatrix2D **projected, int ProjectionType = RoboDK::PROJECTION_ALONG_NORMAL_RECALC);
 
     /// <summary>
     /// Retrieve the currently selected feature for this object.
@@ -2382,6 +2512,21 @@ public:
     tJoints Joints() const ;
 
     /// <summary>
+    /// Return the current joint position of a robot (only from the simulator, never from the real robot).
+    /// This should be used only when RoboDK is connected to the real robot and only the simulated robot needs to be retrieved (for example, if we want to move the robot using a spacemouse).
+    /// Note: Use Joints() instead to retrieve the simulated and real robot position when connected.
+    /// </summary>
+    /// <returns>joint values of the simulated robot</returns>
+    tJoints SimulatorJoints() const;
+
+    /// <summary>
+    /// Returns the positions of the joint links for a provided robot configuration (joints). If no joints are provided it will return the poses for the current robot position.
+    /// </summary>
+    /// <param name="joints">joints to compute the link poses for. Leave to nullptr to use the current robot position.</param>
+    /// <returns>array of 4x4 homogeneous matrices. Index 0 is the base frame reference (it never moves when the joints move).</returns>
+    QList<Mat> JointPoses(const tJoints *joints = nullptr);
+
+    /// <summary>
     /// Returns the home joints of a robot. These joints can be manually set in the robot "Parameters" menu, then select "Set home position"
     /// </summary>
     /// <returns>joint values for the home position</returns>
@@ -2405,6 +2550,20 @@ public:
     /// <param name="type_linked">type of linked object to retrieve</param>
     /// <returns>Linked object</returns>
     Item getLink(int type_linked = RoboDK::ITEM_TYPE_ROBOT);
+
+    /// <summary>
+    /// Get all the items of a specific type for which getLink() returns this item.
+    /// </summary>
+    /// <param name="type_linked">type of the items to check for a link (ITEM_TYPE_*). Use ITEM_TYPE_ANY to check for any type.</param>
+    /// <returns>A list of items for which getLink() returns this item</returns>
+    QList<Item> getLinks(int type_linked = RoboDK::ITEM_TYPE_ROBOT);
+
+    /// <summary>
+    /// Sets a link between this item and the specified item.
+    /// This is useful to set the relationship between programs, robots, tools and other specific projects.
+    /// </summary>
+    /// <param name="item">item to link</param>
+    void setLink(const Item &item);
 
     /// <summary>
     /// Set robot joints or the joints of a target
@@ -2491,6 +2650,15 @@ public:
     QList<tJoints> SolveIK_All(const Mat &pose, const Mat *tool=nullptr, const Mat *ref=nullptr);
 
     /// <summary>
+    /// Filters a target to improve accuracy. This option requires a calibrated robot.
+    /// </summary>
+    /// <param name="pose">pose of the robot TCP with respect to the robot reference frame</param>
+    /// <param name="joints_filtered">Filtered joints, as an output</param>
+    /// <param name="joints_approx">approximated desired joints to define the preferred configuration. Leave to nullptr to use [0,0,0,0,0,0].</param>
+    /// <returns>Filtered pose</returns>
+    Mat FilterTarget(const Mat &pose, tJoints *joints_filtered = nullptr, const tJoints *joints_approx = nullptr);
+
+    /// <summary>
     /// Connect to a real robot using the corresponding robot driver.
     /// </summary>
     /// <param name="robot_ip">IP of the robot to connect. Leave empty to use the one defined in RoboDK</param>
@@ -2502,6 +2670,16 @@ public:
     /// </summary>
     /// <returns>true if disconnected successfully, false if it failed. It can fail if it was previously disconnected manually for example.</returns>
     bool Disconnect();
+
+    /// <summary>
+    /// Set the robot connection parameters
+    /// </summary>
+    /// <param name="robot_ip">robot IP</param>
+    /// <param name="port">robot communication port</param>
+    /// <param name="remote_path">path to transfer files on the robot controller</param>
+    /// <param name="ftp_user">user name for the FTP connection</param>
+    /// <param name="ftp_pass">password credential for the FTP connection</param>
+    void setConnectionParams(const QString &robot_ip, int port, const QString &remote_path, const QString &ftp_user, const QString &ftp_pass);
 
     /// <summary>
     /// Moves a robot to a specific target ("Move Joint" mode). By default, this function blocks until the robot finishes its movements.
@@ -2542,6 +2720,30 @@ public:
     void MoveL(const Mat &target, bool blocking = true);
 
     /// <summary>
+    /// Moves a robot to a specific target and stops when a specific input switch is detected ("Search Linear" mode). By default, this function blocks until the robot finishes its movements.
+    /// </summary>
+    /// <param name="target">Target to move to as a target item (RoboDK target item)</param>
+    /// <param name="blocking">Set to True to wait until the robot finished the movement (default=True). Set to false to make it a non blocking call.</param>
+    /// <returns>Joints at the search state (simulated robot). Invalid (empty) joints if this item is a program.</returns>
+    tJoints SearchL(const Item &target, bool blocking = true);
+
+    /// <summary>
+    /// Moves a robot to a specific target and stops when a specific input switch is detected ("Search Linear" mode). By default, this function blocks until the robot finishes its movements.
+    /// </summary>
+    /// <param name="target">Robot joints to move to</param>
+    /// <param name="blocking">Set to True to wait until the robot finished the movement (default=True). Set to false to make it a non blocking call.</param>
+    /// <returns>Joints at the search state (simulated robot). Invalid (empty) joints if this item is a program.</returns>
+    tJoints SearchL(const tJoints &target, bool blocking = true);
+
+    /// <summary>
+    /// Moves a robot to a specific target and stops when a specific input switch is detected ("Search Linear" mode). By default, this function blocks until the robot finishes its movements.
+    /// </summary>
+    /// <param name="target">Pose target to move to. It must be a 4x4 Homogeneous matrix</param>
+    /// <param name="blocking">Set to True to wait until the robot finished the movement (default=True). Set to false to make it a non blocking call.</param>
+    /// <returns>Joints at the search state (simulated robot). Invalid (empty) joints if this item is a program.</returns>
+    tJoints SearchL(const Mat &target, bool blocking = true);
+
+    /// <summary>
     /// Moves a robot to a specific target ("Move Circular" mode). By default, this function blocks until the robot finishes its movements.
     /// </summary>
     /// <param name="itemtarget1">Intermediate target to move to as a target item (RoboDK target item)</param>
@@ -2572,6 +2774,17 @@ public:
     int MoveJ_Test(const tJoints &j1, const tJoints &j2, double minstep_deg = -1);
 
     /// <summary>
+    /// Checks if a joint movement with blending is feasible and free of collisions (if collision checking is activated). The robot will move to the collision point if a collision is detected (use Joints to collect the collision joints) or it will be placed at the destination joints if a collision is not detected.
+    /// </summary>
+    /// <param name="j1">Start joints</param>
+    /// <param name="j2">Joints via</param>
+    /// <param name="j3">Joints final destination</param>
+    /// <param name="blend_deg">Blend in degrees</param>
+    /// <param name="minstep_deg">Maximum joint step in degrees</param>
+    /// <returns>collision : returns 0 if the movement is free of collision. Otherwise it returns the number of pairs of objects that collided if there was a collision.</returns>
+    int MoveJ_Test_Blend(const tJoints &j1, const tJoints &j2, const tJoints &j3, double blend_deg = 5, double minstep_deg = -1);
+
+    /// <summary>
     /// Checks if a linear movement is free of issues and, optionally, collisions.
     /// </summary>
     /// <param name="joints1">Start joints</param>
@@ -2588,6 +2801,24 @@ public:
     /// <param name="speed_joints">joint speed in deg/s (-1 = no change)</param>
     /// <param name="accel_joints">joint acceleration in deg/s2 (-1 = no change)</param>
     void setSpeed(double speed_linear, double accel_linear = -1, double speed_joints = -1, double accel_joints = -1);
+
+    /// <summary>
+    /// Sets the linear acceleration of a robot in mm/s2
+    /// </summary>
+    /// <param name="accel_linear">acceleration in mm/s2</param>
+    void setAcceleration(double accel_linear);
+
+    /// <summary>
+    /// Sets the joint speed of a robot in deg/s for rotary joints and mm/s for linear joints
+    /// </summary>
+    /// <param name="speed_joints">speed in deg/s for rotary joints and mm/s for linear joints</param>
+    void setSpeedJoints(double speed_joints);
+
+    /// <summary>
+    /// Sets the joint acceleration of a robot
+    /// </summary>
+    /// <param name="accel_joints">acceleration in deg/s2 for rotary joints and mm/s2 for linear joints</param>
+    void setAccelerationJoints(double accel_joints);
 
     /// <summary>
     /// Sets the robot movement smoothing accuracy (also known as zone data value).
@@ -2619,10 +2850,46 @@ public:
     void WaitMove(double timeout_sec = 300) const;
 
     /// <summary>
+    /// Wait until a program finishes or a robot completes its movement
+    /// </summary>
+    void WaitFinished();
+
+    /// <summary>
+    /// Defines the name of the program when a program must be generated.
+    /// It is possible to specify the name of the post processor as well as the folder to save the program.
+    /// This method must be called before any program output is generated (before any robot movement or other program instructions).
+    /// </summary>
+    /// <param name="progname">name of the program</param>
+    /// <param name="folder">folder to save the program, leave empty to use the default program folder</param>
+    /// <param name="postprocessor">name of the post processor (for a post processor in C:/RoboDK/Posts/Fanuc_post.py it is possible to provide "Fanuc_post.py" or simply "Fanuc_post")</param>
+    int ProgramStart(const QString &progname, const QString &folder = "", const QString &postprocessor = "");
+
+    /// <summary>
     /// Sets the accuracy of the robot active or inactive. A robot must have been calibrated to properly use this option.
     /// </summary>
     /// <param name="accurate">set to 1 to use the accurate model or 0 to use the nominal model</param>
     void setAccuracyActive(int accurate = 1);
+
+    /// <summary>
+    /// Returns True if the accurate kinematics are being used. Accurate kinematics are available after a robot calibration.
+    /// </summary>
+    bool AccuracyActive();
+
+    /// <summary>
+    /// Sets the tool mass and center of gravity. This is only used with accurate robots to improve accuracy.
+    /// </summary>
+    /// <param name="tool_mass">tool weigth in Kg</param>
+    /// <param name="tool_cog">tool center of gravity as [x,y,z] with respect to the robot flange</param>
+    void setParamRobotTool(double tool_mass = 5, const tXYZ tool_cog = nullptr);
+
+    /// <summary>
+    /// Filter a program file to improve accuracy for a specific robot. The robot must have been previously calibrated.
+    /// It returns 0 if the filter succeeded, or a negative value if there are filtering problems. It also returns a summary of the filtering.
+    /// </summary>
+    /// <param name="filestr">File path of the program. Formats supported include: JBI (Motoman), SRC (KUKA), MOD (ABB), PRG (ABB), LS (FANUC).</param>
+    /// <param name="filter_msg">Returns a summary of the filtering</param>
+    /// <returns>0 if the filter succeeded, or a negative value if there are filtering problems</returns>
+    int FilterProgram(const QString &filestr, QString *filter_msg = nullptr);
 
     /// <summary>
     /// Saves a program to a file.
@@ -2638,6 +2905,11 @@ public:
     /// </summary>
     /// <returns>number of instructions that can be executed</returns>
     void setRunType(int program_run_type);
+
+    /// <summary>
+    /// Get the Run Type of a program to specify if a program made using the GUI will be run in simulation mode or on the real robot ("Run on robot" option).
+    /// </summary>
+    int RunType();
 
     /// <summary>
     /// Runs a program. It returns the number of instructions that can be executed successfully (a quick program check is performed before the program starts)
@@ -2721,8 +2993,30 @@ public:
     void customInstruction(const QString &name, const QString &path_run, const QString &path_icon = "", bool blocking = true, const QString &cmd_run_on_robot = "");
 
 
-    //void addMoveJ(const Item &itemtarget);
-    //void addMoveL(const Item &itemtarget);
+    /// <summary>
+    /// Adds a new robot joint move instruction to a program. Obsolete. Use MoveJ instead.
+    /// </summary>
+    /// <param name="itemtarget">target item to move to</param>
+    void addMoveJ(const Item &itemtarget);
+
+    /// <summary>
+    /// Adds a new linear move instruction to a program. Obsolete. Use MoveL instead.
+    /// </summary>
+    /// <param name="itemtarget">target item to move to</param>
+    void addMoveL(const Item &itemtarget);
+
+    /// <summary>
+    /// Adds a new linear search move instruction to a program. Obsolete. Use SearchL instead.
+    /// </summary>
+    /// <param name="itemtarget">target item to move to</param>
+    void addMoveSearch(const Item &itemtarget);
+
+    /// <summary>
+    /// Adds a new circular move instruction to a program. Obsolete. Use MoveL and MoveC instead.
+    /// </summary>
+    /// <param name="itemtarget1">pass through target item</param>
+    /// <param name="itemtarget2">final target item</param>
+    void addMoveC(const Item &itemtarget1, const Item &itemtarget2);
 
     /// <summary>
     /// Show or hide instruction items of a program in the RoboDK tree
@@ -2741,6 +3035,17 @@ public:
     /// </summary>
     /// <returns></returns>
     int InstructionCount();
+
+    /// <summary>
+    /// Select an instruction in the program as a reference to add new instructions. New instructions will be added after the selected instruction.
+    /// If no instruction ID is specified, the active instruction will be selected and returned (if the program is running), otherwise it returns -1.
+    /// </summary>
+    int InstructionSelect(int ins_id = -1);
+
+    /// <summary>
+    /// Delete an instruction of a program
+    /// </summary>
+    int InstructionDelete(int ins_id = 0);
 
     /// <summary>
     /// Returns the program instruction at position id
