@@ -935,6 +935,12 @@ public:
     void CloseStation();
 
     /// <summary>
+    /// Remove a list of items.
+    /// </summary>
+    /// <param name="item_list">List of items to delete.</param>
+    void Delete(const QList<Item> &item_list);
+
+    /// <summary>
     /// Adds a new target that can be reached with a robot.
     /// </summary>
     /// <param name="name">Name of the target.</param>
@@ -1055,6 +1061,18 @@ public:
     bool setCollisionActivePair(int check_state, Item item1, Item item2, int id1 = 0, int id2 = 0);
 
     /// <summary>
+    /// Set collision checking ON or OFF (COLLISION_ON/COLLISION_OFF) for a specific list of pairs of objects. This allows altering the collision map for Collision checking.
+    /// Specify the link id for robots or moving mechanisms (id 0 is the base).
+    /// </summary>
+    /// <param name="list_check_state">List of check states (COLLISION_ON/COLLISION_OFF), one for each pair of objects</param>
+    /// <param name="list_item1">List of the first item of each pair</param>
+    /// <param name="list_item2">List of the second item of each pair</param>
+    /// <param name="list_id1">List of the joint id for the first item of each pair (if the first item is a robot or a mechanism). Leave empty to use 0 (the base) for all pairs.</param>
+    /// <param name="list_id2">List of the joint id for the second item of each pair (if the second item is a robot or a mechanism). Leave empty to use 0 (the base) for all pairs.</param>
+    /// <returns>Returns the result of the operation (unequal to 0 means success).</returns>
+    int setCollisionActivePairList(const QList<int> &list_check_state, const QList<Item> &list_item1, const QList<Item> &list_item2, const QList<int> &list_id1 = QList<int>(), const QList<int> &list_id2 = QList<int>());
+
+    /// <summary>
     /// Returns the number of pairs of objects that are currently in a collision state.
     /// </summary>
     /// <returns>0 if no collisions are found.</returns>
@@ -1086,6 +1104,15 @@ public:
     QList<Item> getCollisionItems(QList<int>& link_id_list);
 
     /// <summary>
+    /// Return the list of pairs of items that are currently in a collision state.
+    /// </summary>
+    /// <param name="item1">List of the first colliding objects</param>
+    /// <param name="item2">List of the second colliding objects</param>
+    /// <param name="id1">List of Joint IDs for the first colliding objects</param>
+    /// <param name="id2">List of Joint IDs for the second colliding objects</param>
+    void CollisionPairs(QList<Item>& item1, QList<Item>& item2, QList<int>& id1, QList<int>& id2);
+
+    /// <summary>
     /// Sets the current simulation speed. Set the speed to 1 for a real-time simulation. The slowest speed allowed is 0.001 times the real speed. Set to a high value (>100) for fast simulation results.
     /// </summary>
     /// <param name="speed">Simulation speed ratio (1 means real time simulation)</param>
@@ -1096,6 +1123,13 @@ public:
     /// </summary>
     /// <returns>Simulation speed ratio (1 means real time simulation)</returns>
     double SimulationSpeed();
+
+    /// <summary>
+    /// Retrieve the simulation time (in seconds). Time of 0 seconds starts with the first time this function is called.
+    /// The simulation time changes depending on the simulation speed. The simulation time is usually faster than the real time (5 times by default).
+    /// </summary>
+    /// <returns>Simulation time, in seconds.</returns>
+    double SimulationTime();
 
     /// <summary>
     /// Sets the behavior of the RoboDK API. By default, RoboDK shows the path simulation for movement instructions (run_mode=1=RUNMODE_SIMULATE).
@@ -1169,6 +1203,16 @@ public:
     bool LaserTrackerMeasure(tXYZ xyz, tXYZ estimate, bool search = false);
 
     /// <summary>
+    /// Takes a measurement with a 6D measurement device. It returns two poses, the base reference frame and the measured object reference frame. Status is negative if the measurement failed. extra data is [error_avg, error_max] in mm, if we are averaging a pose.
+    /// </summary>
+    /// <param name="target">Target ID for measurement devices that support multiple targets</param>
+    /// <param name="time_avg_ms">Take the measurement for a period of time and average the result.</param>
+    /// <param name="tip_xyz">Offset the measurement to the tip.</param>
+    /// <param name="extra_data">Optionally retrieve extra data as [error_avg, error_max] in mm, if we are averaging a pose.</param>
+    /// <returns>Measured pose (the base reference frame with respect to the measured object reference frame)</returns>
+    Mat MeasurePose(int target = -1, double time_avg_ms = 0, const tXYZ tip_xyz = nullptr, double *extra_data = nullptr);
+
+    /// <summary>
     /// Checks the collision between a line and any objects in the station. The line is composed by 2 points.
     /// Returns the collided item. Use Item.Valid() to check if there was a valid collision.
     /// </summary>
@@ -1179,6 +1223,36 @@ public:
     /// <param name="pref">Optionally pass the reference frame for points p1 and p2.</param>
     /// <returns>True if collision found.</returns>
     bool CollisionLine(const tXYZ p1, const tXYZ p2, Item *itm, tXYZ xyz, const Mat *pref=nullptr);
+
+    /// <summary>
+    /// Sets the relative positions (poses) of a list of items with respect to their parent. For example, the position of an object/frame/target with respect to its parent.
+    /// Use this function instead of Item::setPose() for faster speed.
+    /// </summary>
+    /// <param name="items">List of items to set the pose</param>
+    /// <param name="poses">List of relative poses to apply to each item, in the same order as items</param>
+    void setPoses(const QList<Item> &items, const QList<Mat> &poses);
+
+    /// <summary>
+    /// Set the absolute positions (poses) of a list of items with respect to the station reference. For example, the position of an object/frame/target with respect to its parent.
+    /// Use this function instead of Item::setPose() for faster speed.
+    /// </summary>
+    /// <param name="items">List of items to set the pose</param>
+    /// <param name="poses">List of absolute poses to apply to each item, in the same order as items</param>
+    void setPosesAbs(const QList<Item> &items, const QList<Mat> &poses);
+
+    /// <summary>
+    /// Return the current joints of a list of robots.
+    /// </summary>
+    /// <param name="robot_item_list">List of robot items</param>
+    /// <returns>List of robot joints, in the same order as robot_item_list</returns>
+    QList<tJoints> Joints(const QList<Item> &robot_item_list);
+
+    /// <summary>
+    /// Sets the current robot joints for a list of robot items and a list of joints.
+    /// </summary>
+    /// <param name="robot_item_list">List of robot items</param>
+    /// <param name="joints_list">List of joints to apply to each robot item, in the same order as robot_item_list</param>
+    void setJoints(const QList<Item> &robot_item_list, const QList<tJoints> &joints_list);
 
     /// \brief Set a list of items visibile (faster than the default setVisible())
     void setVisible(const QList<Item> &itemList, const QList<bool> &visibleList, const QList<int> &visibleFrames);
@@ -1232,6 +1306,27 @@ public:
     Mat ViewPose();
 
     /// <summary>
+    /// Create a new robot or mechanism.
+    /// </summary>
+    /// <param name="type">Type of the mechanism (see MAKE_ROBOT_* constants)</param>
+    /// <param name="list_obj">list of object items that build the robot</param>
+    /// <param name="parameters">robot parameters in the same order as shown in the RoboDK menu: Utilities-Build Mechanism or robot</param>
+    /// <param name="joints_build">current state of the robot (joint axes) to build the robot</param>
+    /// <param name="joints_home">joints for the home position (it can be changed later)</param>
+    /// <param name="joints_senses">joint sense: set to +1 or -1 for each axis</param>
+    /// <param name="joints_lim_low">joint lower limits</param>
+    /// <param name="joints_lim_high">joint upper limits</param>
+    /// <param name="base">base frame pose (offset the model by applying a base frame transformation)</param>
+    /// <param name="tool">tool frame pose (offset the tool flange by applying a tool frame transformation)</param>
+    /// <param name="name">robot name</param>
+    /// <param name="robot">existing robot in the station to replace it (optional)</param>
+    /// <returns>New robot/mechanism item (invalid item if it failed)</returns>
+    Item BuildMechanism(int type, const QList<Item> &list_obj, const QList<double> &parameters, const QList<double> &joints_build, const QList<double> &joints_home, const QList<int> &joints_senses, const QList<double> &joints_lim_low, const QList<double> &joints_lim_high, const Mat &base = Mat(), const Mat &tool = Mat(), const QString &name = "New robot", Item *robot = nullptr);
+
+    //------------------------------------------------------------------
+    //----------------------- CAMERA VIEWS ----------------------------
+
+    /// <summary>
     /// Add a simulated 2D or depth camera as an item. Use Delete to delete it.
     /// </summary>
     /// <param name="item_object">Reference or object to attach the camera</param>
@@ -1249,6 +1344,13 @@ public:
     /// <returns>Returns 1 if success, 0 otherwise</returns>
     int Cam2D_Snapshot(const QString &file_save_img, const Item &cam_item, const QString &params="");
 
+    /// <summary>
+    /// Closes all camera windows or one specific camera if the camera item is provided.
+    /// </summary>
+    /// <param name="cam_item">Camera item (returned by Cam2D_Add). Leave to nullptr (default) to close all simulated views.</param>
+    /// <returns>True if success, false otherwise.</returns>
+    bool Cam2D_Close(const Item *cam_item = nullptr);
+
      /// <summary>
      /// Set the camera parameters.
      /// </summary>
@@ -1256,6 +1358,52 @@ public:
      /// <param name="cam_item">Camera item</param>
      /// <returns>Returns 1 if success, 0 otherwise</returns>
      int Cam2D_SetParams(const QString &cam_params, const Item &cam_item);
+
+    //------------------------------------------------------------------
+    //----------------------- SPRAY GUN SIMULATION ----------------------------
+
+    /// <summary>
+    /// Add a simulated spray gun that allows projecting particles to a part. This is useful to simulate applications such as:
+    /// arc welding, spot welding, 3D printing, painting, inspection or robot machining to verify the trace.
+    /// Select ESC to clear the trace manually.
+    /// </summary>
+    /// <param name="item_tool">Tool item to use, or nullptr to auto detect the active tool</param>
+    /// <param name="item_object">Object item to project the particles to, or nullptr to auto detect the object in the active reference frame</param>
+    /// <param name="params">A string specifying the behavior of the simulated particles. The string can contain one or more of the following commands (separated by a space):
+    /// STEP=AxB: Defines the grid to be projected 1x1 means only one line of particle projection (for example, for welding)
+    /// PARTICLE: Defines the shape and size of particle (sphere or particle), unless a specific geometry is provided: SPHERE(radius, facets), SPHERE(radius, facets, scalex, scaley, scalez), CUBE(sizex, sizey, sizez)
+    /// RAND=factor: Defines a random factor factor 0 means that the particles are not deposited randomly
+    /// ELLYPSE: defines the volume as an ellypse (default)
+    /// RECTANGLE: defines the volume as a rectangle
+    /// PROJECT: project the particles to the surface (default) (for welding, painting or scanning)
+    /// NO_PROJECT: does not project the particles to the surface (for example, for 3D printing)</param>
+    /// <param name="points">provide the volume as a list of points as described in the sample macro SprayOn.py</param>
+    /// <param name="geometry">(optional) provide a list of points describing triangles to define a specific particle geometry. Use this option instead of the PARTICLE command.</param>
+    /// <returns>Spray gun handle (id_spray)</returns>
+    int Spray_Add(Item *item_tool = nullptr, Item *item_object = nullptr, const QString &params = "", tMatrix2D *points = nullptr, tMatrix2D *geometry = nullptr);
+
+    /// <summary>
+    /// Sets the state of a simulated spray gun (ON or OFF)
+    /// </summary>
+    /// <param name="state">Set to ON or OFF. Use the defined constants: SPRAY_*</param>
+    /// <param name="id_spray">spray handle (pointer returned by Spray_Add). Leave to -1 to apply to all simulated sprays.</param>
+    /// <returns>Returns 1 if success, 0 otherwise</returns>
+    int Spray_SetState(int state = SPRAY_ON, int id_spray = -1);
+
+    /// <summary>
+    /// Gets statistics from all simulated spray guns or a specific spray gun.
+    /// </summary>
+    /// <param name="data">Statistics data, returned as a matrix</param>
+    /// <param name="id_spray">spray handle (pointer returned by Spray_Add). Leave to -1 to apply to all simulated sprays.</param>
+    /// <returns>Spray statistics as a readable string</returns>
+    QString Spray_GetStats(tMatrix2D **data, int id_spray = -1);
+
+    /// <summary>
+    /// Stops simulating a spray gun. This will clear the simulated particles.
+    /// </summary>
+    /// <param name="id_spray">spray handle (pointer returned by Spray_Add). Leave the default -1 to apply to all simulated sprays.</param>
+    /// <returns>Returns 1 if success, 0 otherwise</returns>
+    int Spray_Clear(int id_spray = -1);
 
     /// <summary>
     /// Set the nominal robot parameters.
@@ -1302,7 +1450,14 @@ public:
     /// </summary>
     /// <returns>List of items to set as selected</returns>
     void setSelection(QList<Item> list_items);
-	
+
+    /// <summary>
+    /// Merge multiple object items as one. A new object is created and returned. Provided objects are deleted.
+    /// </summary>
+    /// <param name="list_items">List of items to merge</param>
+    /// <returns>New object created</returns>
+    Item MergeItems(const QList<Item> &list_items = QList<Item>());
+
 	/// <summary>
 	/// Load or unload the specified plugin (path to DLL, dylib or SO file). If the plugin is already loaded it will unload the plugin and reload it. Pass an empty plugin_name to reload all plugins.
 	/// </summary>
@@ -1321,6 +1476,15 @@ public:
     /// <param name="side">Cube side, in mm.</param>
     /// <returns>IS9283 Program or nullptr if the user cancelled.</returns>
     Item Popup_ISO9283_CubeProgram(Item *robot=nullptr, tXYZ center=nullptr, double side=-1, bool blocking=true);
+
+    /// <summary>
+    /// Set the interactive mode to define the behavior when navigating and selecting items in RoboDK's 3D view.
+    /// </summary>
+    /// <param name="mode_type">The mode type defines what accion occurs when the 3D view is selected (Select object, Pan, Rotate, Zoom, Move Objects, ...). Use the SELECT_* constants.</param>
+    /// <param name="default_ref_flags">When a movement is specified, we can provide what motion we allow by default with respect to the coordinate system (set apropriate flags). Use the DISPLAY_REF_* constants.</param>
+    /// <param name="custom_objects">Provide a list of optional items to customize the move behavior for these specific items (important: the length of custom_ref_flags must match)</param>
+    /// <param name="custom_ref_flags">Provide a matching list of flags to customize the movement behavior for specific items</param>
+    void setInteractiveMode(int mode_type = SELECT_MOVE, int default_ref_flags = DISPLAY_REF_DEFAULT, const QList<Item> *custom_objects = nullptr, const QList<int> *custom_ref_flags = nullptr);
 
     /// Send file from the current location to the RoboDK instance
     bool FileSet(const QString &file_local, const QString &file_remote="", bool load_file=true, Item *attach_to=nullptr);
@@ -1641,6 +1805,120 @@ public:
 
         /// Use collision checking
         COLLISION_ON = 1
+    };
+
+    /// Robot/mechanism types (used by BuildMechanism)
+    enum {
+        /// 1R model type flag
+        MAKE_ROBOT_1R = 1,
+
+        /// 2R model type flag
+        MAKE_ROBOT_2R = 2,
+
+        /// 3R model type flag
+        MAKE_ROBOT_3R = 3,
+
+        /// 1T model type flag
+        MAKE_ROBOT_1T = 4,
+
+        /// 2T model type flag
+        MAKE_ROBOT_2T = 5,
+
+        /// 3T model type flag
+        MAKE_ROBOT_3T = 6,
+
+        /// 6 DOF robot model type flag
+        MAKE_ROBOT_6DOF = 7,
+
+        /// 7 DOF robot model type flag
+        MAKE_ROBOT_7DOF = 8,
+
+        /// SCARA robot model type flag
+        MAKE_ROBOT_SCARA = 9,
+
+        /// Gripper model type flag
+        MAKE_ROBOT_GRIPPER = 10,
+
+        /// 6 DOF cobot model type flag
+        MAKE_ROBOT_6COBOT = 11,
+
+        /// 1T1R model type flag
+        MAKE_ROBOT_1T1R = 12,
+
+        /// 5 axis CNC model type flag
+        MAKE_ROBOT_5XCNC = 13,
+
+        /// 3T1R model type flag
+        MAKE_ROBOT_3T1R = 15,
+
+        /// Generic model type flag
+        MAKE_ROBOT_GENERIC = 16
+    };
+
+    /// Interactive selection option (for 3D mouse behavior and setInteractiveMode)
+    enum {
+        /// Reset selection flag
+        SELECT_RESET = -1,
+
+        /// None selection flag
+        SELECT_NONE = 0,
+
+        /// Rectangle selection flag
+        SELECT_RECTANGLE = 1,
+
+        /// Rotate selection flag
+        SELECT_ROTATE = 2,
+
+        /// Zoom selection flag
+        SELECT_ZOOM = 3,
+
+        /// Pan selection flag
+        SELECT_PAN = 4,
+
+        /// Move selection flag
+        SELECT_MOVE = 5,
+
+        /// Move Shift selection flag
+        SELECT_MOVE_SHIFT = 6,
+
+        /// Move Clear selection flag
+        SELECT_MOVE_CLEAR = 7
+    };
+
+    /// Bit masks to show specific reference frames and customize the display of references (for picking references with the 3D mouse and setInteractiveMode)
+    enum {
+        /// Default reference frame visibility flag
+        DISPLAY_REF_DEFAULT = -1,
+
+        /// None reference frame visibility flag
+        DISPLAY_REF_NONE = 0,
+
+        /// TX reference frame visibility flag
+        DISPLAY_REF_TX = 0x001,
+
+        /// TY reference frame visibility flag
+        DISPLAY_REF_TY = 0x002,
+
+        /// TZ reference frame visibility flag
+        DISPLAY_REF_TZ = 0x004,
+
+        /// RX reference frame visibility flag
+        DISPLAY_REF_RX = 0x008,
+
+        /// RY reference frame visibility flag
+        DISPLAY_REF_RY = 0x010,
+
+        /// RZ reference frame visibility flag
+        DISPLAY_REF_RZ = 0x020,
+
+        /// Plane XY reference frame visibility flag
+        DISPLAY_REF_PXY = 0x040,
+
+        /// Plane XZ reference frame visibility flag
+        DISPLAY_REF_PXZ = 0x080,
+
+        /// Plane YZ reference frame visibility flag
+        DISPLAY_REF_PYZ = 0x100
     };
 
     // Event types

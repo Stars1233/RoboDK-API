@@ -2933,6 +2933,22 @@ void RoboDK::CloseStation()
 }
 
 /// <summary>
+/// Remove a list of items.
+/// </summary>
+/// <param name="item_list">List of items to delete. Each item is invalidated (set to 0) once it has been removed.</param>
+void RoboDK::Delete(const QList<Item> &item_list)
+{
+    _check_connection();
+    _send_Line("RemoveLst");
+    _send_Int(item_list.size());
+    for (int i = 0; i < item_list.size(); i++)
+    {
+        _send_Item(item_list.at(i));
+    }
+    _check_status();
+}
+
+/// <summary>
 /// Adds a new target that can be reached with a robot.
 /// </summary>
 /// <param name="name">name of the target</param>
@@ -3169,6 +3185,45 @@ bool RoboDK::setCollisionActivePair(int check_state, Item item1, Item item2, int
 }
 
 /// <summary>
+/// Set collision checking ON or OFF (COLLISION_ON/COLLISION_OFF) for a specific list of pairs of objects. This allows altering the collision map for Collision checking.
+/// Specify the link id for robots or moving mechanisms (id 0 is the base).
+/// </summary>
+/// <param name="list_check_state">List of check states (COLLISION_ON/COLLISION_OFF), one for each pair of objects</param>
+/// <param name="list_item1">List of the first item of each pair</param>
+/// <param name="list_item2">List of the second item of each pair</param>
+/// <param name="list_id1">List of the joint id for the first item of each pair (if the first item is a robot or a mechanism). Leave empty to use 0 (the base) for all pairs.</param>
+/// <param name="list_id2">List of the joint id for the second item of each pair (if the second item is a robot or a mechanism). Leave empty to use 0 (the base) for all pairs.</param>
+/// <returns>Returns the result of the operation (unequal to 0 means success).</returns>
+int RoboDK::setCollisionActivePairList(const QList<int> &list_check_state, const QList<Item> &list_item1, const QList<Item> &list_item2, const QList<int> &list_id1, const QList<int> &list_id2)
+{
+    _check_connection();
+    int npairs = qMin(list_check_state.length(), qMin(list_item1.length(), list_item2.length()));
+    _send_Line("Collision_SetPairList");
+    _send_Int(npairs);
+    for (int i = 0; i < npairs; i++)
+    {
+        _send_Item(list_item1.at(i));
+        _send_Item(list_item2.at(i));
+        int id1 = 0;
+        int id2 = 0;
+        if (list_id1.length() > i)
+        {
+            id1 = list_id1.at(i);
+        }
+        if (list_id2.length() > i)
+        {
+            id2 = list_id2.at(i);
+        }
+        _send_Int(id1);
+        _send_Int(id2);
+        _send_Int(list_check_state.at(i));
+    }
+    int success = _recv_Int();
+    _check_status();
+    return success;
+}
+
+/// <summary>
 /// Returns the number of pairs of objects that are currently in a collision state.
 /// </summary>
 /// <returns></returns>
@@ -3258,6 +3313,40 @@ QList<Item> RoboDK::getCollisionItems(QList<int>& link_id_list)
 }
 
 /// <summary>
+/// Return the list of pairs of items that are currently in a collision state.
+/// </summary>
+/// <param name="item1">List of the first colliding objects</param>
+/// <param name="item2">List of the second colliding objects</param>
+/// <param name="id1">List of Joint IDs for the first colliding objects</param>
+/// <param name="id2">List of Joint IDs for the second colliding objects</param>
+void RoboDK::CollisionPairs(QList<Item>& item1, QList<Item>& item2, QList<int>& id1, QList<int>& id2)
+{
+    _check_connection();
+    _send_Line("Collision_Pairs");
+    int nitems = _recv_Int();
+
+    item1.clear();
+    item2.clear();
+    id1.clear();
+    id2.clear();
+
+    item1.reserve(nitems);
+    item2.reserve(nitems);
+    id1.reserve(nitems);
+    id2.reserve(nitems);
+
+    for (int i = 0; i < nitems; ++i)
+    {
+        item1.append(_recv_Item());
+        id1.append(_recv_Int());
+        item2.append(_recv_Item());
+        id2.append(_recv_Int());
+    }
+
+    _check_status();
+}
+
+/// <summary>
 /// Sets the current simulation speed. Set the speed to 1 for a real-time simulation. The slowest speed allowed is 0.001 times the real speed. Set to a high value (>100) for fast simulation results.
 /// </summary>
 /// <param name="speed"></param>
@@ -3277,6 +3366,20 @@ double RoboDK::SimulationSpeed()
 {
     _check_connection();
     _send_Line("GetSimulateSpeed");
+    double speed = ((double)_recv_Int()) / 1000.0;
+    _check_status();
+    return speed;
+}
+
+/// <summary>
+/// Retrieve the simulation time (in seconds). Time of 0 seconds starts with the first time this function is called.
+/// The simulation time changes depending on the simulation speed. The simulation time is usually faster than the real time (5 times by default).
+/// </summary>
+/// <returns>Simulation time, in seconds.</returns>
+double RoboDK::SimulationTime()
+{
+    _check_connection();
+    _send_Line("GetSimTime");
     double speed = ((double)_recv_Int()) / 1000.0;
     _check_status();
     return speed;
@@ -3413,6 +3516,48 @@ bool RoboDK::LaserTrackerMeasure(tXYZ xyz, tXYZ estimate, bool search)
     return true;
 }
 
+/// <summary>
+/// Takes a measurement with a 6D measurement device. It returns two poses, the base reference frame and the measured object reference frame. Status is negative if the measurement failed. extra data is [error_avg, error_max] in mm, if we are averaging a pose.
+/// </summary>
+/// <param name="target">Target ID for measurement devices that support multiple targets</param>
+/// <param name="time_avg_ms">Take the measurement for a period of time and average the result.</param>
+/// <param name="tip_xyz">Offset the measurement to the tip.</param>
+/// <param name="extra_data">Optionally retrieve extra data as [error_avg, error_max] in mm, if we are averaging a pose.</param>
+/// <returns>Measured pose (the base reference frame with respect to the measured object reference frame)</returns>
+Mat RoboDK::MeasurePose(int target, double time_avg_ms, const tXYZ tip_xyz, double *extra_data)
+{
+    _check_connection();
+    _send_Line("MeasPose4");
+    double array_send[5];
+    array_send[0] = (double) target;
+    array_send[1] = time_avg_ms;
+    if (tip_xyz != nullptr)
+    {
+        array_send[2] = tip_xyz[0];
+        array_send[3] = tip_xyz[1];
+        array_send[4] = tip_xyz[2];
+    }
+    else
+    {
+        array_send[2] = 0;
+        array_send[3] = 0;
+        array_send[4] = 0;
+    }
+    _send_Array(array_send, 5);
+    Mat pose1 = _recv_Pose();
+    if (extra_data != nullptr)
+    {
+        _recv_Array(extra_data);
+    }
+    else
+    {
+        double data_ignored[20];
+        _recv_Array(data_ignored);
+    }
+    _check_status();
+    return pose1;
+}
+
 
 /// Translate a 3D point (Multiply a 4x4 pose x 3D point)
 void MULT_MAT_POINT(double *out, const double *H, const double *p){
@@ -3447,6 +3592,111 @@ bool RoboDK::CollisionLine(const tXYZ p1, const tXYZ p2, Item *itm, tXYZ xyz, co
     _recv_XYZ(xyz);
     _check_status();
     return itm->_PTR != 0;
+}
+
+/// <summary>
+/// Sets the relative positions (poses) of a list of items with respect to their parent. For example, the position of an object/frame/target with respect to its parent.
+/// Use this function instead of Item::setPose() for faster speed.
+/// </summary>
+/// <param name="items">List of items to set the pose</param>
+/// <param name="poses">List of relative poses to apply to each item, in the same order as items</param>
+void RoboDK::setPoses(const QList<Item> &items, const QList<Mat> &poses)
+{
+    if (items.length() != poses.length())
+    {
+        return;
+    }
+
+    if (items.length() == 0)
+    {
+        return;
+    }
+
+    _check_connection();
+    _send_Line("S_Hlocals");
+    _send_Int(items.length());
+    for (int i = 0; i < items.length(); i++)
+    {
+        _send_Item(items.at(i));
+        _send_Pose(poses.at(i));
+    }
+    _check_status();
+}
+
+/// <summary>
+/// Set the absolute positions (poses) of a list of items with respect to the station reference. For example, the position of an object/frame/target with respect to its parent.
+/// Use this function instead of Item::setPose() for faster speed.
+/// </summary>
+/// <param name="items">List of items to set the pose</param>
+/// <param name="poses">List of absolute poses to apply to each item, in the same order as items</param>
+void RoboDK::setPosesAbs(const QList<Item> &items, const QList<Mat> &poses)
+{
+    if (items.length() != poses.length())
+    {
+        return;
+    }
+
+    if (items.length() == 0)
+    {
+        return;
+    }
+
+    _check_connection();
+    _send_Line("S_Hlocal_AbsS");
+    _send_Int(items.length());
+    for (int i = 0; i < items.length(); i++)
+    {
+        _send_Item(items.at(i));
+        _send_Pose(poses.at(i));
+    }
+    _check_status();
+}
+
+/// <summary>
+/// Return the current joints of a list of robots.
+/// </summary>
+/// <param name="robot_item_list">List of robot items</param>
+/// <returns>List of robot joints, in the same order as robot_item_list</returns>
+QList<tJoints> RoboDK::Joints(const QList<Item> &robot_item_list)
+{
+    _check_connection();
+    _send_Line("G_ThetasList");
+    int nrobs = robot_item_list.length();
+    _send_Int(nrobs);
+    QList<tJoints> joints_list;
+    for (int i = 0; i < nrobs; i++)
+    {
+        _send_Item(robot_item_list.at(i));
+        tJoints joints_i;
+        _recv_Array(&joints_i);
+        joints_list.append(joints_i);
+    }
+    _check_status();
+    return joints_list;
+}
+
+/// <summary>
+/// Sets the current robot joints for a list of robot items and a list of joints.
+/// </summary>
+/// <param name="robot_item_list">List of robot items</param>
+/// <param name="joints_list">List of joints to apply to each robot item, in the same order as robot_item_list</param>
+void RoboDK::setJoints(const QList<Item> &robot_item_list, const QList<tJoints> &joints_list)
+{
+    int nrobs = robot_item_list.length();
+    if (nrobs != joints_list.length())
+    {
+        return;
+    }
+
+    _check_connection();
+    _send_Line("S_ThetasList");
+    _send_Int(nrobs);
+    for (int i = 0; i < nrobs; i++)
+    {
+        _send_Item(robot_item_list.at(i));
+        _send_Array(&joints_list.at(i));
+    }
+    _check_status();
 }
 
 void RoboDK::setVisible(const QList<Item> &itemList, const QList<bool> &visibleList, const QList<int> &visibleFrames)
@@ -3628,6 +3878,80 @@ bool RoboDK::SetRobotParams(Item *robot, tMatrix2D dhm, Mat poseBase, Mat poseTo
 }
 */
 
+/// <summary>
+/// Create a new robot or mechanism.
+/// </summary>
+/// <param name="type">Type of the mechanism (see MAKE_ROBOT_* constants)</param>
+/// <param name="list_obj">list of object items that build the robot</param>
+/// <param name="parameters">robot parameters in the same order as shown in the RoboDK menu: Utilities-Build Mechanism or robot</param>
+/// <param name="joints_build">current state of the robot (joint axes) to build the robot</param>
+/// <param name="joints_home">joints for the home position (it can be changed later)</param>
+/// <param name="joints_senses">joint sense: set to +1 or -1 for each axis</param>
+/// <param name="joints_lim_low">joint lower limits</param>
+/// <param name="joints_lim_high">joint upper limits</param>
+/// <param name="base">base frame pose (offset the model by applying a base frame transformation)</param>
+/// <param name="tool">tool frame pose (offset the tool flange by applying a tool frame transformation)</param>
+/// <param name="name">robot name</param>
+/// <param name="robot">existing robot in the station to replace it (optional)</param>
+/// <returns>New robot/mechanism item (invalid item if it failed)</returns>
+Item RoboDK::BuildMechanism(int type, const QList<Item> &list_obj, const QList<double> &parameters, const QList<double> &joints_build, const QList<double> &joints_home, const QList<int> &joints_senses, const QList<double> &joints_lim_low, const QList<double> &joints_lim_high, const Mat &base, const Mat &tool, const QString &name, Item *robot)
+{
+    _check_connection();
+    int ndofs = list_obj.length() - 1;
+    _send_Line("BuildMechanism");
+    _send_Item(robot);
+    _send_Line(name);
+    _send_Int(type);
+    _send_Int(ndofs);
+    for (int i = 0; i <= ndofs; i++)
+    {
+        _send_Item(list_obj.at(i));
+    }
+    _send_Pose(base);
+    _send_Pose(tool);
+
+    int nparams = parameters.length();
+    double *parameters_buffer = new double[nparams > 0 ? nparams : 1];
+    for (int i = 0; i < nparams; i++)
+    {
+        parameters_buffer[i] = parameters.at(i);
+    }
+    _send_Array(parameters_buffer, nparams);
+    delete[] parameters_buffer;
+
+    // Joints_build must have at least 12 values (pad with zeros), matching the Python API
+    QList<double> joints_build_padded = joints_build;
+    while (joints_build_padded.length() < 12)
+    {
+        joints_build_padded.append(0);
+    }
+
+    int njoints = joints_build_padded.length();
+    tMatrix2D *joints_data = Matrix2D_Create();
+    Matrix2D_Set_Size(joints_data, njoints, 5);
+    double *col_build = Matrix2D_Get_col(joints_data, 0);
+    double *col_home = Matrix2D_Get_col(joints_data, 1);
+    double *col_senses = Matrix2D_Get_col(joints_data, 2);
+    double *col_lim_low = Matrix2D_Get_col(joints_data, 3);
+    double *col_lim_high = Matrix2D_Get_col(joints_data, 4);
+    for (int i = 0; i < njoints; i++)
+    {
+        col_build[i] = joints_build_padded.value(i, 0.0);
+        col_home[i] = joints_home.value(i, 0.0);
+        col_senses[i] = (double) joints_senses.value(i, 0);
+        col_lim_low[i] = joints_lim_low.value(i, 0.0);
+        col_lim_high[i] = joints_lim_high.value(i, 0.0);
+    }
+    _send_Matrix2D(joints_data);
+    Matrix2D_Delete(&joints_data);
+
+    Item newrobot = _recv_Item();
+    _check_status();
+    return newrobot;
+}
+
+//------------------------------------------------------------------
+//----------------------- CAMERA VIEWS ----------------------------
 Item RoboDK::Cam2D_Add(const Item &item_object, const QString &cam_params, const Item *cam_item)
 {
     _check_connection();
@@ -3654,6 +3978,28 @@ int RoboDK::Cam2D_Snapshot(const QString &file_save_img, const Item &cam_item, c
     return status;
 }
 
+/// <summary>
+/// Closes all camera windows or one specific camera if the camera item is provided.
+/// </summary>
+/// <param name="cam_item">Camera item (returned by Cam2D_Add). Leave to nullptr (default) to close all simulated views.</param>
+/// <returns>True if success, false otherwise.</returns>
+bool RoboDK::Cam2D_Close(const Item *cam_item)
+{
+    _check_connection();
+    if (cam_item == nullptr)
+    {
+        _send_Line("Cam2D_CloseAll");
+    }
+    else
+    {
+        _send_Line("Cam2D_PtrClose");
+        _send_Item(cam_item);
+    }
+    bool success = _recv_Int() > 0;
+    _check_status();
+    return success;
+}
+
 int RoboDK::Cam2D_SetParams(const QString &params, const Item &cam_item)
 {
     _check_connection();
@@ -3663,6 +4009,100 @@ int RoboDK::Cam2D_SetParams(const QString &params, const Item &cam_item)
     int status = _recv_Int();
     _check_status();
     return status;
+}
+
+//------------------------------------------------------------------
+//----------------------- SPRAY GUN SIMULATION ----------------------------
+
+/// <summary>
+/// Add a simulated spray gun that allows projecting particles to a part. This is useful to simulate applications such as:
+/// arc welding, spot welding, 3D printing, painting, inspection or robot machining to verify the trace.
+/// Select ESC to clear the trace manually.
+/// </summary>
+/// <param name="item_tool">Tool item to use, or nullptr to auto detect the active tool</param>
+/// <param name="item_object">Object item to project the particles to, or nullptr to auto detect the object in the active reference frame</param>
+/// <param name="params">A string specifying the behavior of the simulated particles (STEP, PARTICLE, RAND, ELLYPSE, RECTANGLE, PROJECT, NO_PROJECT, ...)</param>
+/// <param name="points">provide the volume as a list of points as described in the sample macro SprayOn.py</param>
+/// <param name="geometry">(optional) provide a list of points describing triangles to define a specific particle geometry. Use this option instead of the PARTICLE command.</param>
+/// <returns>Spray gun handle (id_spray)</returns>
+int RoboDK::Spray_Add(Item *item_tool, Item *item_object, const QString &params, tMatrix2D *points, tMatrix2D *geometry)
+{
+    _check_connection();
+    _send_Line("Gun_Add");
+    _send_Item(item_tool);
+    _send_Item(item_object);
+    _send_Line(params);
+    if (points != nullptr)
+    {
+        _send_Matrix2D(points);
+    }
+    else
+    {
+        _send_Int(0);
+        _send_Int(0);
+    }
+    if (geometry != nullptr)
+    {
+        _send_Matrix2D(geometry);
+    }
+    else
+    {
+        _send_Int(0);
+        _send_Int(0);
+    }
+    int id_spray = _recv_Int();
+    _check_status();
+    return id_spray;
+}
+
+/// <summary>
+/// Sets the state of a simulated spray gun (ON or OFF)
+/// </summary>
+/// <param name="state">Set to ON or OFF. Use the defined constants: SPRAY_*</param>
+/// <param name="id_spray">spray handle (pointer returned by Spray_Add). Leave to -1 to apply to all simulated sprays.</param>
+/// <returns>Returns 1 if success, 0 otherwise</returns>
+int RoboDK::Spray_SetState(int state, int id_spray)
+{
+    _check_connection();
+    _send_Line("Gun_SetState");
+    _send_Int(id_spray);
+    _send_Int(state);
+    int success = _recv_Int();
+    _check_status();
+    return success;
+}
+
+/// <summary>
+/// Gets statistics from all simulated spray guns or a specific spray gun.
+/// </summary>
+/// <param name="data">Statistics data, returned as a matrix</param>
+/// <param name="id_spray">spray handle (pointer returned by Spray_Add). Leave to -1 to apply to all simulated sprays.</param>
+/// <returns>Spray statistics as a readable string</returns>
+QString RoboDK::Spray_GetStats(tMatrix2D **data, int id_spray)
+{
+    _check_connection();
+    _send_Line("Gun_Stats");
+    _send_Int(id_spray);
+    QString info = _recv_Line();
+    info.replace("<br>", "\t");
+    _recv_Matrix2D(data);
+    _check_status();
+    return info;
+}
+
+/// <summary>
+/// Stops simulating a spray gun. This will clear the simulated particles.
+/// </summary>
+/// <param name="id_spray">spray handle (pointer returned by Spray_Add). Leave the default -1 to apply to all simulated sprays.</param>
+/// <returns>Returns 1 if success, 0 otherwise</returns>
+int RoboDK::Spray_Clear(int id_spray)
+{
+    _check_connection();
+    _send_Line("Gun_Clear");
+    _send_Int(id_spray);
+    int success = _recv_Int();
+    _check_status();
+    return success;
 }
 
 Item RoboDK::getCursorXYZ(int x, int y, tXYZ xyzStation)
@@ -3768,6 +4208,25 @@ void RoboDK::setSelection(QList<Item> list_items)
     _check_status();
 }
 
+/// <summary>
+/// Merge multiple object items as one. A new object is created and returned. Provided objects are deleted.
+/// </summary>
+/// <param name="list_items">List of items to merge</param>
+/// <returns>New object created</returns>
+Item RoboDK::MergeItems(const QList<Item> &list_items)
+{
+    _check_connection();
+    _send_Line("MergeItems");
+    _send_Int(list_items.length());
+    for (int i = 0; i < list_items.length(); i++)
+    {
+        _send_Item(list_items.at(i));
+    }
+    Item newitem = _recv_Item();
+    _check_status();
+    return newitem;
+}
+
 
 /// <summary>
 /// Load or unload the specified plugin (path to DLL, dylib or SO file). If the plugin is already loaded it will unload the plugin and reload it. Pass an empty plugin_name to reload all plugins.
@@ -3835,6 +4294,36 @@ Item RoboDK::Popup_ISO9283_CubeProgram(Item *robot, tXYZ center, double side, bo
         }
     }
     return iso_program;
+}
+
+/// <summary>
+/// Set the interactive mode to define the behavior when navigating and selecting items in RoboDK's 3D view.
+/// </summary>
+/// <param name="mode_type">The mode type defines what accion occurs when the 3D view is selected (Select object, Pan, Rotate, Zoom, Move Objects, ...). Use the SELECT_* constants.</param>
+/// <param name="default_ref_flags">When a movement is specified, we can provide what motion we allow by default with respect to the coordinate system (set apropriate flags). Use the DISPLAY_REF_* constants.</param>
+/// <param name="custom_objects">Provide a list of optional items to customize the move behavior for these specific items (important: the length of custom_ref_flags must match)</param>
+/// <param name="custom_ref_flags">Provide a matching list of flags to customize the movement behavior for specific items</param>
+void RoboDK::setInteractiveMode(int mode_type, int default_ref_flags, const QList<Item> *custom_objects, const QList<int> *custom_ref_flags)
+{
+    _check_connection();
+    _send_Line("S_InteractiveMode");
+    _send_Int(mode_type);
+    _send_Int(default_ref_flags);
+    if (custom_objects == nullptr || custom_ref_flags == nullptr)
+    {
+        _send_Int(-1);
+    }
+    else
+    {
+        int nitems = qMin(custom_objects->length(), custom_ref_flags->length());
+        _send_Int(nitems);
+        for (int i = 0; i < nitems; i++)
+        {
+            _send_Item(custom_objects->at(i));
+            _send_Int(custom_ref_flags->at(i));
+        }
+    }
+    _check_status();
 }
 
 bool RoboDK::FileSet(const QString &path_file_local, const QString &file_remote, bool load_file, Item *attach_to)
