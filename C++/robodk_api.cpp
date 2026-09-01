@@ -3428,10 +3428,13 @@ bool RoboDK::CollisionLine(const tXYZ p1, const tXYZ p2, Item *itm, tXYZ xyz, co
     xyz[2] = 0.0;
     _check_connection();
     _send_Line("CollisionLine");
-    if (pref == nullptr){
+    if (pref == nullptr)
+    {
         _send_XYZ(p1);
         _send_XYZ(p2);
-    } else {
+    }
+    else
+    {
         const double *matd = pref->ValuesD();
         tXYZ p1abs;
         tXYZ p2abs;
@@ -3444,6 +3447,28 @@ bool RoboDK::CollisionLine(const tXYZ p1, const tXYZ p2, Item *itm, tXYZ xyz, co
     _recv_XYZ(xyz);
     _check_status();
     return itm->_PTR != 0;
+}
+
+void RoboDK::setVisible(const QList<Item> &itemList, const QList<bool> &visibleList, const QList<int> &visibleFrames)
+{
+    _check_connection();
+    _send_Line("S_VisibleList");
+
+    int size = qMin(itemList.size(), visibleList.size());
+    _send_Int(size);
+
+    for (int i = 0; i < size; i++)
+    {
+        _send_Item(itemList[i]);
+        _send_Int(visibleList[i] ? 1 : 0);
+
+        int frameVis = -1;
+        if (i < visibleFrames.size())
+            frameVis = visibleFrames[i];
+
+        _send_Int(frameVis);
+    }
+    _check_status();
 }
 
 

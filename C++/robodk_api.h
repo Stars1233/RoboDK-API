@@ -1181,7 +1181,7 @@ public:
     bool CollisionLine(const tXYZ p1, const tXYZ p2, Item *itm, tXYZ xyz, const Mat *pref=nullptr);
 
     /// \brief Set a list of items visibile (faster than the default setVisible())
-    void setVisible(QList<Item> itemList, QList<bool> visibleList, QList<int> visibleFrames);
+    void setVisible(const QList<Item> &itemList, const QList<bool> &visibleList, const QList<int> &visibleFrames);
 
     ///
     /// \brief Show a list of items as collided.
